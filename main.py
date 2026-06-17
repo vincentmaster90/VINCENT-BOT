@@ -231,6 +231,16 @@ try:
 except:
     HTML_CONTENT = '<h1>Bot Server Running</h1>'
 
+# ─── AUTO START BOTS ON FIRST REQUEST ────────────────────────────────────────
+_started = False
+
+@app.before_request
+def auto_start():
+    global _started
+    if not _started:
+        _started = True
+        start_bot_thread()
+
 # ─── ROUTES ───────────────────────────────────────────────────────────────────
 @app.route('/')
 def index():
