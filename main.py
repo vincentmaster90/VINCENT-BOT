@@ -27,7 +27,7 @@ server_bots = {
         'capital': 1.38,
         'sl': 3,
         'tp': 6,
-        'running': False,
+        'running': True if i == 1 else False,
         'signal': 'HOLD',
         'pnl': 0,
         'trades': 0,
@@ -197,7 +197,15 @@ def run_bots_forever():
         time.sleep(30)
 
 # ─── AUTO-START BOT THREAD ────────────────────────────────────────────────────
-def start_bot_thread():
+def start_bot_thread()
+
+# Auto-activate Bot 1 on server start
+server_bots['1']['running'] = True
+server_bots['1']['interval'] = 60  # 1 hour for faster signals
+server_bots['1']['sl'] = 0.5
+server_bots['1']['tp'] = 1.0
+server_bots['1']['capital'] = 13.80  # 20% of $69
+print("✅ Bot 1 auto-activated on server start"):
     global bot_thread_running
     if not bot_thread_running:
         bot_thread_running = True
@@ -206,6 +214,14 @@ def start_bot_thread():
         print("Bot thread started")
 
 start_bot_thread()
+
+# Auto-activate Bot 1 on server start
+server_bots['1']['running'] = True
+server_bots['1']['interval'] = 60  # 1 hour for faster signals
+server_bots['1']['sl'] = 0.5
+server_bots['1']['tp'] = 1.0
+server_bots['1']['capital'] = 13.80  # 20% of $69
+print("✅ Bot 1 auto-activated on server start")
 
 # ─── HTML ─────────────────────────────────────────────────────────────────────
 html_path = os.path.join(os.path.dirname(__file__), 'templates', 'index.html')
