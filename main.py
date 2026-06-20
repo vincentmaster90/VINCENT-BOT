@@ -17,6 +17,8 @@ CORS(app)
 KRAKEN_API_KEY = os.environ.get('KRAKEN_API_KEY', '')
 KRAKEN_API_SECRET = os.environ.get('KRAKEN_API_SECRET', '')
 
+TRADES_FILE = '/app/trade_history.json'
+
 server_bots = {}
 for i in range(1, 11):
     server_bots[str(i)] = {
@@ -39,7 +41,51 @@ for i in range(1, 11):
         'ma_slow': 0,
     }
 
+trade_history = []
 bot_thread_running = False
+
+
+def load_trade_history():
+    global trade_history
+    try:
+        with open(TRADES_FILE, 'r') as f:
+            trade_history = json.load(f)
+        print('Loaded ' + str(len(trade_history)) + ' trades from history')
+    except:
+        trade_history = []
+
+
+def save_trade_history():
+    try:
+        with open(TRADES_FILE, 'w') as f:
+            json.dump(trade_history, f)
+    except Exception as e:
+        print('Save error: ' + str(e))
+
+
+def record_trade(bot, trade_type, price, pnl=None, reason='Signal'):
+    trade = {
+        'id': len(trade_history) + 1,
+        'bot': bot['name'],
+        'type': trade_type,
+        'price': round(price, 2),
+        'capital': bot['capital'],
+        'pnl': round(pnl, 4) if pnl is not None else None,
+        'pnl_pct': round((pnl / bot['capital']) * 100, 2) if pnl is not None else None,
+        'reason': reason,
+        'sl': bot['sl'],
+        'tp': bot['tp'],
+        'interval': bot['interval'],
+        'date': datetime.now().strftime('%Y-%m-%d'),
+        'time': datetime.now().strftime('%H:%M:%S'),
+        'timestamp': datetime.now().isoformat(),
+        'signal': bot['signal'],
+        'ma_fast': bot['ma_fast'],
+        'ma_slow': bot['ma_slow'],
+    }
+    trade_history.append(trade)
+    save_trade_history()
+    return trade
 
 
 def get_kraken_ohlc(interval=240):
@@ -147,7 +193,8 @@ def bot_tick(bot):
                 bot['pnl'] = round(bot['pnl'] + pnl, 4)
                 bot['trades'] += 1
                 bot['open_position'] = None
-                add_log(bot, 'STOP LOSS @ $' + str(round(price, 2)) + ' | ' + str(round(pnl_pct*100, 2)) + '%', 'sell')
+                add_log(bot, 'STOP LOSS @ $' + str(round(price, 2)) + ' | ' + str(round(pnl_pct*100, 2)) + '% | $' + str(round(pnl, 2)), 'sell')
+                record_trade(bot, 'SELL', price, pnl, 'Stop Loss')
                 qty = bot['capital'] / entry
                 place_kraken_order('sell', qty)
             elif pnl_pct >= (bot['tp'] / 100):
@@ -156,7 +203,8 @@ def bot_tick(bot):
                 bot['trades'] += 1
                 bot['wins'] += 1
                 bot['open_position'] = None
-                add_log(bot, 'TAKE PROFIT @ $' + str(round(price, 2)) + ' | +' + str(round(pnl_pct*100, 2)) + '%', 'buy')
+                add_log(bot, 'TAKE PROFIT @ $' + str(round(price, 2)) + ' | +' + str(round(pnl_pct*100, 2)) + '% | +$' + str(round(pnl, 2)), 'buy')
+                record_trade(bot, 'SELL', price, pnl, 'Take Profit')
                 qty = bot['capital'] / entry
                 place_kraken_order('sell', qty)
 
@@ -166,6 +214,7 @@ def bot_tick(bot):
         if signal == 'BUY' and last != 'BUY' and not bot.get('open_position'):
             bot['open_position'] = {'price': price, 'time': datetime.now().isoformat()}
             add_log(bot, 'BUY @ $' + str(round(price, 2)), 'buy')
+            record_trade(bot, 'BUY', price, None, 'MA Crossover')
             qty = bot['capital'] / price
             success, result = place_kraken_order('buy', qty)
             if not success:
@@ -179,7 +228,8 @@ def bot_tick(bot):
             if pnl > 0:
                 bot['wins'] += 1
             bot['open_position'] = None
-            add_log(bot, 'SELL @ $' + str(round(price, 2)) + ' | ' + str(round(pnl_pct*100, 2)) + '%', 'sell')
+            add_log(bot, 'SELL @ $' + str(round(price, 2)) + ' | ' + str(round(pnl_pct*100, 2)) + '% | $' + str(round(pnl, 2)), 'sell')
+            record_trade(bot, 'SELL', price, pnl, 'MA Crossover')
             qty = bot['capital'] / entry
             place_kraken_order('sell', qty)
 
@@ -210,6 +260,8 @@ def start_bot_thread():
         t.start()
         print('Bot thread started')
 
+
+load_trade_history()
 
 html_path = os.path.join(os.path.dirname(__file__), 'templates', 'index.html')
 try:
@@ -242,7 +294,8 @@ def status():
         'status': 'running',
         'api_key_set': bool(KRAKEN_API_KEY),
         'active_bots': active,
-        'total_bots': len(server_bots)
+        'total_bots': len(server_bots),
+        'total_trades': len(trade_history)
     })
 
 
@@ -296,6 +349,35 @@ def get_log():
             all_logs.append(e)
     all_logs.sort(key=lambda x: x.get('time', ''), reverse=True)
     return jsonify(all_logs[:50])
+
+
+@app.route('/api/trades')
+def get_trades():
+    return jsonify(trade_history)
+
+
+@app.route('/api/trades/summary')
+def trades_summary():
+    total = len(trade_history)
+    buys = [t for t in trade_history if t['type'] == 'BUY']
+    sells = [t for t in trade_history if t['type'] == 'SELL']
+    wins = [t for t in sells if t.get('pnl') and t['pnl'] > 0]
+    losses = [t for t in sells if t.get('pnl') and t['pnl'] <= 0]
+    total_pnl = sum(t.get('pnl', 0) for t in sells if t.get('pnl'))
+    best = max((t.get('pnl', 0) for t in sells), default=0)
+    worst = min((t.get('pnl', 0) for t in sells), default=0)
+    win_rate = round(len(wins) / len(sells) * 100, 1) if sells else 0
+    return jsonify({
+        'total_trades': total,
+        'buys': len(buys),
+        'sells': len(sells),
+        'wins': len(wins),
+        'losses': len(losses),
+        'win_rate': win_rate,
+        'total_pnl': round(total_pnl, 4),
+        'best_trade': round(best, 4),
+        'worst_trade': round(worst, 4),
+    })
 
 
 @app.route('/api/price')
